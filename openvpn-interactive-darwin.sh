@@ -155,9 +155,5 @@ else
 fi
 PASS=$(security find-generic-password -s "$SVC_NAME" -a "$USER" -w)
 
-echo "Connecting with profile: $CONFIG_PATH and user: $USER and pass: $PASS"
 # Start OpenVPN connection
-
-# openvpn --config "$CONFIG_PATH" --auth-user-pass <(printf '%s\n%s\n' "$USER" "$PASS")
-
-# Ensure script ends cleanly
+openvpn --config "$CONFIG_PATH" --auth-user-pass <(printf '%s\n%s\n' "$USER" "$PASS")
