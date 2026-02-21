@@ -1,6 +1,7 @@
 #!/bin/bash
 
 SVC_NAME="com.openvpninteractive"
+DRY_RUN=false
 
 # Check if run as root
 if [[ $EUID -ne 0 ]]; then
@@ -32,19 +33,33 @@ PROFILES=("$PROFILE_DIR"/*.ovpn)
 
 # 'setup' subcommand to add credentials to keychain
 if [[ "$1" == "setup" ]]; then
+    shift
+    # Check for --dry-run in remaining args
+    for arg in "$@"; do
+        [[ "$arg" == "--dry-run" ]] && DRY_RUN=true
+    done
     echo "Username:"
     read -r VPN_USER
     echo "Password:"
     read -s -r VPN_PASS
-    security add-generic-password -s "$SVC_NAME" -a "$VPN_USER" -w "$VPN_PASS" -U
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "[DRY-RUN] Would save credentials for user '$VPN_USER' to keychain as '$SVC_NAME'."
+    else
+        security add-generic-password -s "$SVC_NAME" -a "$VPN_USER" -w "$VPN_PASS" -U
+        echo "Credentials saved to keychain as '$SVC_NAME'."
+    fi
     unset VPN_USER
     unset VPN_PASS
-    echo "Credentials saved to keychain as '$SVC_NAME'."
     exit 0
 fi
 
 # 'remove-setup' subcommand to remove credentials from keychain
 if [[ "$1" == "remove-setup" ]]; then
+    shift
+    # Check for --dry-run in remaining args
+    for arg in "$@"; do
+        [[ "$arg" == "--dry-run" ]] && DRY_RUN=true
+    done
     ACCOUNTS=($(get_accounts "$SVC_NAME"))
     if [[ ${#ACCOUNTS[@]} -eq 0 ]]; then
         echo "No $SVC_NAME credentials found in keychain."
@@ -61,8 +76,12 @@ if [[ "$1" == "remove-setup" ]]; then
         exit 1
     fi
     USER="${ACCOUNTS[$((USER_INDEX-1))]}"
-    security delete-generic-password -s "$SVC_NAME" -a "$USER"
-    echo "Removed credentials for user: $USER"
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "[DRY-RUN] Would remove credentials for user: $USER"
+    else
+        security delete-generic-password -s "$SVC_NAME" -a "$USER"
+        echo "Removed credentials for user: $USER"
+    fi
     exit 0
 fi
 
@@ -79,11 +98,17 @@ while [[ $# -gt 0 ]]; do
             USER_ARG="$2"
             shift 2
             ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
         --help|-h)
-            echo "Usage: $0 [--profile <path>] [--user <username>]"
+            echo "Usage: $0 [--profile <path>] [--user <username>] [--dry-run]"
             echo "  setup                 Setup username and password for OpenVPN (saved to keychain)"
+            echo "  remove-setup          Remove credentials from keychain"
             echo "  --profile, -p <path>  Specify path to .ovpn profile file"
             echo "  --user, -u <username> Specify user/account for OpenVPN (skip selection)"
+            echo "  --dry-run             Show what would be done without making changes"
             echo "  --help, -h            Show this help message"
             exit 0
             ;;
@@ -156,4 +181,11 @@ fi
 PASS=$(security find-generic-password -s "$SVC_NAME" -a "$USER" -w)
 
 # Start OpenVPN connection
-openvpn --config "$CONFIG_PATH" --auth-user-pass <(printf '%s\n%s\n' "$USER" "$PASS")
+if [[ "$DRY_RUN" == true ]]; then
+    echo "[DRY-RUN] Would connect to VPN with:"
+    echo "  Profile: $CONFIG_PATH"
+    echo "  User: $USER"
+    echo "  Command: openvpn --config \"$CONFIG_PATH\" --auth-user-pass <credentials>"
+else
+    openvpn --config "$CONFIG_PATH" --auth-user-pass <(printf '%s\n%s\n' "$USER" "$PASS")
+fi
