@@ -13,6 +13,7 @@ A simple interactive utility for managing OpenVPN profiles and credentials on ma
 - `sudo openvpn-interactive-darwin.sh remove-setup` — Remove credentials from Keychain
 - `sudo openvpn-interactive-darwin.sh` — Select and connect to a profile interactively
 - Use `--profile <path>` to specify a profile directly
+- Use `--user <username>` to specify a user directly
 
 ## Profile Location
 - Profiles are loaded from:
