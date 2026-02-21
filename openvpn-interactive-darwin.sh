@@ -68,16 +68,22 @@ fi
 
 # Parse arguments
 PROFILE_ARG=""
+USER_ARG=""
 while [[ $# -gt 0 ]]; do
     case $1 in
         --profile|-p)
             PROFILE_ARG="$2"
             shift 2
             ;;
+        --user|-u)
+            USER_ARG="$2"
+            shift 2
+            ;;
         --help|-h)
-            echo "Usage: $0 [--profile <path>]"
+            echo "Usage: $0 [--profile <path>] [--user <username>]"
             echo "  setup                 Setup username and password for OpenVPN (saved to keychain)"
             echo "  --profile, -p <path>  Specify path to .ovpn profile file"
+            echo "  --user, -u <username> Specify user/account for OpenVPN (skip selection)"
             echo "  --help, -h            Show this help message"
             exit 0
             ;;
@@ -122,20 +128,30 @@ if [[ ${#ACCOUNTS[@]} -eq 0 ]]; then
     echo "No $SVC_NAME credentials found in keychain. Run $0 setup to add."
     exit 1
 fi
-if [[ ${#ACCOUNTS[@]} -eq 1 ]]; then
-    USER="${ACCOUNTS[0]}"
-else
-    echo "Available $SVC_NAME users:"
-    for i in "${!ACCOUNTS[@]}"; do
-        echo "$((i+1)). ${ACCOUNTS[$i]}"
-    done
-    read -p "Select user [1]: " USER_INDEX
-    USER_INDEX=${USER_INDEX:-1}
-    if ! [[ $USER_INDEX =~ ^[0-9]+$ ]] || (( USER_INDEX < 1 )) || (( USER_INDEX > ${#ACCOUNTS[@]} )); then
-        echo "Invalid selection. Exiting."
+
+# If --user/-u specified, use it directly
+if [[ -n "$USER_ARG" ]]; then
+    USER="$USER_ARG"
+    if ! [[ " ${ACCOUNTS[*]} " =~ " $USER " ]]; then
+        echo "User '$USER' not found in keychain for $SVC_NAME."
         exit 1
     fi
-    USER="${ACCOUNTS[$((USER_INDEX-1))]}"
+else
+    if [[ ${#ACCOUNTS[@]} -eq 1 ]]; then
+        USER="${ACCOUNTS[0]}"
+    else
+        echo "Available $SVC_NAME users:"
+        for i in "${!ACCOUNTS[@]}"; do
+            echo "$((i+1)). ${ACCOUNTS[$i]}"
+        done
+        read -p "Select user [1]: " USER_INDEX
+        USER_INDEX=${USER_INDEX:-1}
+        if ! [[ $USER_INDEX =~ ^[0-9]+$ ]] || (( USER_INDEX < 1 )) || (( USER_INDEX > ${#ACCOUNTS[@]} )); then
+            echo "Invalid selection. Exiting."
+            exit 1
+        fi
+        USER="${ACCOUNTS[$((USER_INDEX-1))]}"
+    fi
 fi
 PASS=$(security find-generic-password -s "$SVC_NAME" -a "$USER" -w)
 
