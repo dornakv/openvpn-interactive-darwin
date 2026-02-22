@@ -1,7 +1,6 @@
 #!/bin/bash
 
 SVC_NAME="com.openvpninteractive"
-DRY_RUN=false
 
 # Check if run as root
 if [[ $EUID -ne 0 ]]; then
@@ -9,8 +8,8 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-# Check if already running (skip for subcommands and --help)
-if [[ "$1" != "setup" && "$1" != "remove-setup" && "$1" != "stop" && "$1" != "--help" && "$1" != "-h" ]]; then
+# Check if already running (only for start subcommand)
+if [[ "$1" == "start" ]]; then
     if pgrep -f "openvpn.*--daemon $SVC_NAME" > /dev/null 2>&1; then
         echo "OpenVPN daemon '$SVC_NAME' is already running. Use '$0 stop' to stop it."
         exit 1
@@ -30,19 +29,28 @@ get_accounts() {
     }'
 }
 
-# Set PROFILE_DIR based on XDG_CONFIG_HOME or fallback to ~/openvpn/profiles
-if [[ -n "$XDG_CONFIG_HOME" ]]; then
-    PROFILE_DIR="$XDG_CONFIG_HOME/openvpn/profiles"
-else
-    PROFILE_DIR="$HOME/openvpn/profiles"
-fi
-PROFILES=("$PROFILE_DIR"/*.ovpn)
+show_help() {
+    echo "Usage: $0 <subcommand> [options]"
+    echo ""
+    echo "Subcommands:"
+    echo "  start                 Start the OpenVPN daemon"
+    echo "    --profile, -p <path>  Specify path to .ovpn profile file"
+    echo "    --user, -u <username> Specify user/account for OpenVPN (skip selection)"
+    echo "    --dry-run             Show what would be done without making changes"
+    echo ""
+    echo "  stop                  Stop the running OpenVPN daemon"
+    echo "    --dry-run             Show what would be done without making changes"
+    echo ""
+    echo "  setup                 Setup username and password for OpenVPN (saved to keychain)"
+    echo "    --dry-run             Show what would be done without making changes"
+    echo ""
+    echo "  setup-remove          Remove credentials from keychain"
+    echo "    --dry-run             Show what would be done without making changes"
+}
 
-
-# 'setup' subcommand to add credentials to keychain
-if [[ "$1" == "setup" ]]; then
-    shift
-    # Check for --dry-run in remaining args
+setup() {
+    # Check for --dry-run
+    DRY_RUN=false
     for arg in "$@"; do
         [[ "$arg" == "--dry-run" ]] && DRY_RUN=true
     done
@@ -58,13 +66,11 @@ if [[ "$1" == "setup" ]]; then
     fi
     unset VPN_USER
     unset VPN_PASS
-    exit 0
-fi
+}
 
-# 'remove-setup' subcommand to remove credentials from keychain
-if [[ "$1" == "remove-setup" ]]; then
-    shift
-    # Check for --dry-run in remaining args
+setup-remove() {
+    # Check for --dry-run
+    DRY_RUN=false
     for arg in "$@"; do
         [[ "$arg" == "--dry-run" ]] && DRY_RUN=true
     done
@@ -90,12 +96,105 @@ if [[ "$1" == "remove-setup" ]]; then
         security delete-generic-password -s "$SVC_NAME" -a "$USER"
         echo "Removed credentials for user: $USER"
     fi
-    exit 0
-fi
+}
 
-# 'stop' subcommand to stop the running daemon
-if [[ "$1" == "stop" ]]; then
-    shift
+start() {
+    PROFILE_ARG=""
+    USER_ARG=""
+    DRY_RUN=false
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --profile|-p)
+                PROFILE_ARG="$2"
+                shift 2
+                ;;
+            --user|-u)
+                USER_ARG="$2"
+                shift 2
+                ;;
+            --dry-run)
+                DRY_RUN=true
+                shift
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -n "$PROFILE_ARG" ]]; then
+        CONFIG_PATH="$PROFILE_ARG"
+    else
+        # List profiles
+        if [[ ${#PROFILES[@]} -eq 0 || "${PROFILES[0]}" == "${PROFILE_DIR}/*.ovpn" ]]; then
+            echo "No OpenVPN profiles found in $PROFILE_DIR."
+            exit 1
+        fi
+        echo "Available OpenVPN profiles:"
+        for i in "${!PROFILES[@]}"; do
+            echo "$((i+1)). $(basename "${PROFILES[$i]}")"
+        done
+
+        # Prompt user to select
+        read -p "Select profile [1]: " PROFILE_INDEX
+        PROFILE_INDEX=${PROFILE_INDEX:-1}
+        if ! [[ $PROFILE_INDEX =~ ^[0-9]+$ ]] || (( PROFILE_INDEX < 1 )) || (( PROFILE_INDEX > ${#PROFILES[@]} )); then
+            echo "Invalid selection. Exiting."
+            exit 1
+        fi
+        CONFIG_PATH="${PROFILES[$((PROFILE_INDEX-1))]}"
+    fi
+
+    if [[ ! -f "$CONFIG_PATH" ]]; then
+        echo "Error: Could not find config file at $CONFIG_PATH"
+        exit 1
+    fi
+
+    ACCOUNTS=($(get_accounts "$SVC_NAME"))
+    if [[ ${#ACCOUNTS[@]} -eq 0 ]]; then
+        echo "No $SVC_NAME credentials found in keychain. Run $0 setup to add."
+        exit 1
+    fi
+
+    # If --user/-u specified, use it directly
+    if [[ -n "$USER_ARG" ]]; then
+        USER="$USER_ARG"
+        if ! [[ " ${ACCOUNTS[*]} " =~ " $USER " ]]; then
+            echo "User '$USER' not found in keychain for $SVC_NAME."
+            exit 1
+        fi
+    else
+        if [[ ${#ACCOUNTS[@]} -eq 1 ]]; then
+            USER="${ACCOUNTS[0]}"
+        else
+            echo "Available $SVC_NAME users:"
+            for i in "${!ACCOUNTS[@]}"; do
+                echo "$((i+1)). ${ACCOUNTS[$i]}"
+            done
+            read -p "Select user [1]: " USER_INDEX
+            USER_INDEX=${USER_INDEX:-1}
+            if ! [[ $USER_INDEX =~ ^[0-9]+$ ]] || (( USER_INDEX < 1 )) || (( USER_INDEX > ${#ACCOUNTS[@]} )); then
+                echo "Invalid selection. Exiting."
+                exit 1
+            fi
+            USER="${ACCOUNTS[$((USER_INDEX-1))]}"
+        fi
+    fi
+    PASS=$(security find-generic-password -s "$SVC_NAME" -a "$USER" -w)
+
+    # Start OpenVPN connection
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "[DRY-RUN] Would connect to VPN with:"
+        echo "  Profile: $CONFIG_PATH"
+        echo "  User: $USER"
+        echo "  Command: openvpn --config \"$CONFIG_PATH\" --auth-user-pass <credentials>"
+    else
+        openvpn --config "$CONFIG_PATH" --daemon "$SVC_NAME" --auth-user-pass <(printf '%s\n%s\n' "$USER" "$PASS")
+    fi
+    exit 0
+}
+
+stop() {
     for arg in "$@"; do
         [[ "$arg" == "--dry-run" ]] && DRY_RUN=true
     done
@@ -110,110 +209,44 @@ if [[ "$1" == "stop" ]]; then
         echo "Stopped OpenVPN daemon '$SVC_NAME'."
     fi
     exit 0
-fi
+}
 
-# Parse arguments
-PROFILE_ARG=""
-USER_ARG=""
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --profile|-p)
-            PROFILE_ARG="$2"
-            shift 2
-            ;;
-        --user|-u)
-            USER_ARG="$2"
-            shift 2
-            ;;
-        --dry-run)
-            DRY_RUN=true
-            shift
-            ;;
-        --help|-h)
-            echo "Usage: $0 [--profile <path>] [--user <username>] [--dry-run]"
-            echo "  setup                 Setup username and password for OpenVPN (saved to keychain)"
-            echo "  remove-setup          Remove credentials from keychain"
-            echo "  stop                  Stop the running OpenVPN daemon"
-            echo "  --profile, -p <path>  Specify path to .ovpn profile file"
-            echo "  --user, -u <username> Specify user/account for OpenVPN (skip selection)"
-            echo "  --dry-run             Show what would be done without making changes"
-            echo "  --help, -h            Show this help message"
-            exit 0
-            ;;
-        *)
-            shift
-            ;;
-    esac
-done
-
-
-if [[ -n "$PROFILE_ARG" ]]; then
-    CONFIG_PATH="$PROFILE_ARG"
+# Set PROFILE_DIR based on XDG_CONFIG_HOME or fallback to ~/openvpn/profiles
+if [[ -n "$XDG_CONFIG_HOME" ]]; then
+    PROFILE_DIR="$XDG_CONFIG_HOME/openvpn/profiles"
 else
-    # List profiles
-    if [[ ${#PROFILES[@]} -eq 0 || "${PROFILES[0]}" == "${PROFILE_DIR}/*.ovpn" ]]; then
-        echo "No OpenVPN profiles found in $PROFILE_DIR."
-        exit 1
-    fi
-    echo "Available OpenVPN profiles:"
-    for i in "${!PROFILES[@]}"; do
-        echo "$((i+1)). $(basename "${PROFILES[$i]}")"
-    done
+    PROFILE_DIR="$HOME/openvpn/profiles"
+fi
+PROFILES=("$PROFILE_DIR"/*.ovpn)
 
-    # Prompt user to select
-    read -p "Select profile [1]: " PROFILE_INDEX
-    PROFILE_INDEX=${PROFILE_INDEX:-1}
-    if ! [[ $PROFILE_INDEX =~ ^[0-9]+$ ]] || (( PROFILE_INDEX < 1 )) || (( PROFILE_INDEX > ${#PROFILES[@]} )); then
-        echo "Invalid selection. Exiting."
-        exit 1
-    fi
-    CONFIG_PATH="${PROFILES[$((PROFILE_INDEX-1))]}"
+# 'setup' subcommand to add credentials to keychain
+if [[ "$1" == "setup" ]]; then
+    shift
+    setup "$@"
+    exit 0
 fi
 
-# Check if config file exists
-if [[ ! -f "$CONFIG_PATH" ]]; then
-    echo "Error: Could not find config file at $CONFIG_PATH"
-    exit 1
+# 'setup-remove' subcommand to remove credentials from keychain
+if [[ "$1" == "setup-remove" ]]; then
+    shift
+    setup-remove "$@"
+    exit 0
 fi
 
-ACCOUNTS=($(get_accounts "$SVC_NAME"))
-if [[ ${#ACCOUNTS[@]} -eq 0 ]]; then
-    echo "No $SVC_NAME credentials found in keychain. Run $0 setup to add."
-    exit 1
+# 'start' subcommand to start the VPN daemon
+if [[ "$1" == "start" ]]; then
+    shift
+    start "$@"
+    exit 0
 fi
 
-# If --user/-u specified, use it directly
-if [[ -n "$USER_ARG" ]]; then
-    USER="$USER_ARG"
-    if ! [[ " ${ACCOUNTS[*]} " =~ " $USER " ]]; then
-        echo "User '$USER' not found in keychain for $SVC_NAME."
-        exit 1
-    fi
-else
-    if [[ ${#ACCOUNTS[@]} -eq 1 ]]; then
-        USER="${ACCOUNTS[0]}"
-    else
-        echo "Available $SVC_NAME users:"
-        for i in "${!ACCOUNTS[@]}"; do
-            echo "$((i+1)). ${ACCOUNTS[$i]}"
-        done
-        read -p "Select user [1]: " USER_INDEX
-        USER_INDEX=${USER_INDEX:-1}
-        if ! [[ $USER_INDEX =~ ^[0-9]+$ ]] || (( USER_INDEX < 1 )) || (( USER_INDEX > ${#ACCOUNTS[@]} )); then
-            echo "Invalid selection. Exiting."
-            exit 1
-        fi
-        USER="${ACCOUNTS[$((USER_INDEX-1))]}"
-    fi
+# 'stop' subcommand to stop the running daemon
+if [[ "$1" == "stop" ]]; then
+    shift
+    stop "$@"
+    exit 0
 fi
-PASS=$(security find-generic-password -s "$SVC_NAME" -a "$USER" -w)
 
-# Start OpenVPN connection
-if [[ "$DRY_RUN" == true ]]; then
-    echo "[DRY-RUN] Would connect to VPN with:"
-    echo "  Profile: $CONFIG_PATH"
-    echo "  User: $USER"
-    echo "  Command: openvpn --config \"$CONFIG_PATH\" --auth-user-pass <credentials>"
-else
-    openvpn --config "$CONFIG_PATH" --daemon "$SVC_NAME" --auth-user-pass <(printf '%s\n%s\n' "$USER" "$PASS")
-fi
+# Show help if no subcommand
+show_help
+exit 0
