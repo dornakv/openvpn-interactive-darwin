@@ -9,6 +9,14 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
+# Check if already running (skip for subcommands and --help)
+if [[ "$1" != "setup" && "$1" != "remove-setup" && "$1" != "stop" && "$1" != "--help" && "$1" != "-h" ]]; then
+    if pgrep -f "openvpn.*--daemon $SVC_NAME" > /dev/null 2>&1; then
+        echo "OpenVPN daemon '$SVC_NAME' is already running. Use '$0 stop' to stop it."
+        exit 1
+    fi
+fi
+
 # parse accounts from keychain for given service name
 get_accounts() {
     local svc_name="$1"
@@ -85,6 +93,25 @@ if [[ "$1" == "remove-setup" ]]; then
     exit 0
 fi
 
+# 'stop' subcommand to stop the running daemon
+if [[ "$1" == "stop" ]]; then
+    shift
+    for arg in "$@"; do
+        [[ "$arg" == "--dry-run" ]] && DRY_RUN=true
+    done
+    if ! pgrep -f "openvpn.*--daemon $SVC_NAME" > /dev/null 2>&1; then
+        echo "OpenVPN daemon '$SVC_NAME' is not running."
+        exit 0
+    fi
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "[DRY-RUN] Would stop OpenVPN daemon '$SVC_NAME'."
+    else
+        pkill -f "openvpn.*--daemon $SVC_NAME"
+        echo "Stopped OpenVPN daemon '$SVC_NAME'."
+    fi
+    exit 0
+fi
+
 # Parse arguments
 PROFILE_ARG=""
 USER_ARG=""
@@ -106,6 +133,7 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [--profile <path>] [--user <username>] [--dry-run]"
             echo "  setup                 Setup username and password for OpenVPN (saved to keychain)"
             echo "  remove-setup          Remove credentials from keychain"
+            echo "  stop                  Stop the running OpenVPN daemon"
             echo "  --profile, -p <path>  Specify path to .ovpn profile file"
             echo "  --user, -u <username> Specify user/account for OpenVPN (skip selection)"
             echo "  --dry-run             Show what would be done without making changes"
@@ -187,5 +215,5 @@ if [[ "$DRY_RUN" == true ]]; then
     echo "  User: $USER"
     echo "  Command: openvpn --config \"$CONFIG_PATH\" --auth-user-pass <credentials>"
 else
-    openvpn --config "$CONFIG_PATH" --auth-user-pass <(printf '%s\n%s\n' "$USER" "$PASS")
+    openvpn --config "$CONFIG_PATH" --daemon "$SVC_NAME" --auth-user-pass <(printf '%s\n%s\n' "$USER" "$PASS")
 fi
