@@ -1,12 +1,12 @@
 # OpenVPN Interactive Helper on macOS
 
-A simple interactive utility for managing OpenVPN profiles and credentials on macOS.
+A simple interactive utility for managing OpenVPN profiles and credentials in default Keychain on macOS.
 
 ## Features
-- Store OpenVPN credentials securely in macOS Keychain
+- Store OpenVPN credentials securely in macOS default Keychain
 - Select and connect to OpenVPN profiles interactively
 - Supports profile storage in XDG_CONFIG_HOME/openvpn/profiles or ~/openvpn/profiles
-- Add/remove credentials via command line
+- Add/remove credentials to defaul Keychain via command line
 
 ## Usage
 ```
@@ -41,3 +41,12 @@ sudo openvpn-interactive-darwin.sh <subcommand> [options]
 ```
 brew install openvpn
 ```
+
+## SSH Usage
+When running this script over SSH, you must first unlock the default keychain manually (it's only auto-unlocked during GUI login):
+
+```bash
+security unlock-keychain
+```
+
+You'll be prompted for your keychain password. The script will check if the keychain is unlocked and display an error with instructions if it's not.

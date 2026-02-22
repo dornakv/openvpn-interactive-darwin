@@ -8,13 +8,15 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-# Check if already running (only for start subcommand)
-if [[ "$1" == "start" ]]; then
-    if pgrep -f "openvpn.*--daemon $SVC_NAME" > /dev/null 2>&1; then
-        echo "OpenVPN daemon '$SVC_NAME' is already running. Use '$0 stop' to stop it."
+# Check if keychain is unlocked (required for SSH sessions)
+check_keychain() {
+    local keychain
+    keychain=$(security default-keychain | tr -d '[:space:]"')
+    if ! security show-keychain-info "$keychain" 2>/dev/null; then
+        echo "Error: Keychain is locked. Run 'security unlock-keychain $keychain' first."
         exit 1
     fi
-fi
+}
 
 # parse accounts from keychain for given service name
 get_accounts() {
@@ -51,6 +53,7 @@ show_help() {
 }
 
 setup() {
+    check_keychain
     # Check for --dry-run
     DRY_RUN=false
     for arg in "$@"; do
@@ -71,6 +74,7 @@ setup() {
 }
 
 setup-remove() {
+    check_keychain
     # Check for --dry-run
     DRY_RUN=false
     for arg in "$@"; do
@@ -101,6 +105,13 @@ setup-remove() {
 }
 
 start() {
+    # Check if already running
+    if pgrep -f "openvpn.*--daemon $SVC_NAME" > /dev/null 2>&1; then
+        echo "OpenVPN daemon '$SVC_NAME' is already running. Use '$0 stop' to stop it."
+        exit 1
+    fi
+
+    check_keychain
     PROFILE_ARG=""
     USER_ARG=""
     DRY_RUN=false
