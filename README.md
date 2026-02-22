@@ -2,6 +2,22 @@
 
 A simple interactive utility for managing OpenVPN profiles and credentials in default Keychain on macOS.
 
+## Installation
+
+### Homebrew (recommended)
+
+```bash
+brew tap dornakv/openvpn-interactive-darwin
+brew install openvpn-interactive-darwin
+```
+
+### Manual
+
+```bash
+curl -o /usr/local/bin/openvpn-interactive-darwin https://raw.githubusercontent.com/dornakv/openvpn-interactive-darwin/main/openvpn-interactive-darwin.sh
+chmod +x /usr/local/bin/openvpn-interactive-darwin
+```
+
 ## Features
 - Store OpenVPN credentials securely in macOS default Keychain
 - Select and connect to OpenVPN profiles interactively
