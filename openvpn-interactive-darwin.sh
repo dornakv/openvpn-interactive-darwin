@@ -46,6 +46,8 @@ show_help() {
     echo ""
     echo "  setup-remove          Remove credentials from keychain"
     echo "    --dry-run             Show what would be done without making changes"
+    echo ""
+    echo "  state                 Check if VPN is running (shows profile path)"
 }
 
 setup() {
@@ -245,6 +247,20 @@ if [[ "$1" == "stop" ]]; then
     shift
     stop "$@"
     exit 0
+fi
+
+# 'state' subcommand to check if VPN is running
+if [[ "$1" == "state" ]]; then
+    PID=$(pgrep -f "openvpn.*--daemon $SVC_NAME" 2>/dev/null)
+    if [[ -n "$PID" ]]; then
+        CMD_LINE=$(ps -p "$PID" -o args= 2>/dev/null)
+        PROFILE=$(echo "$CMD_LINE" | sed -n 's/.*--config \([^ ]*\).*/\1/p')
+        echo "running: $PROFILE"
+        exit 0
+    else
+        echo "stopped"
+        exit 1
+    fi
 fi
 
 # Show help if no subcommand

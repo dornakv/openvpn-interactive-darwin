@@ -29,6 +29,8 @@ sudo openvpn-interactive-darwin.sh <subcommand> [options]
 **setup-remove** — Remove credentials from Keychain
 - `--dry-run` — Show what would be done without making changes
 
+**state** — Check if VPN is running (shows profile path if running)
+
 ## Profile Location
 - Profiles are loaded from:
   - `$XDG_CONFIG_HOME/openvpn/profiles` (if set)
