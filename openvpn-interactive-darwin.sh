@@ -203,6 +203,9 @@ start() {
         echo "  Command: openvpn --config \"$CONFIG_PATH\" --auth-user-pass <credentials>"
     else
         openvpn --config "$CONFIG_PATH" --daemon "$SVC_NAME" --auth-user-pass <(printf '%s\n%s\n' "$USER" "$PASS")
+        if [[ $? -eq 0 ]]; then
+            echo "Started vpn for profile $(basename $CONFIG_PATH) with user $USER."
+        fi
     fi
     exit 0
 }
